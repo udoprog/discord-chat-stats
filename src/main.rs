@@ -1,62 +1,47 @@
-use anyhow::{anyhow, bail, Result};
+use anyhow::{bail, Result};
 use std::collections::{HashMap, HashSet};
 
 use chrono::prelude::*;
 
-fn print_help() {
-    println!("Usage: chat [--word <word>] [--count] [--dist] [--limit <limit>]");
-    println!();
-    println!("--limit <limit> - Limit the number of users to show (default: 20).");
-    println!("--word <word>   - Add a word to the list to search for. This will cause `words.png` to be written and print word usage statistics to console.");
-    println!("--any           - Like `--word <word>`, but matches any words.");
-    println!("--count         - Perform overall aggregation over total word count use.");
-    println!("--dist          - Write a `contributions.png` which contains a distribution of the percentage of users contributing to chat.");
-}
-
 fn main() -> Result<()> {
-    let mut words = HashSet::new();
-    let mut count = false;
-    let mut dist = false;
-    let mut limit = 20;
-    let mut any_word = false;
-
-    let mut it = std::env::args();
-    it.next();
-
-    while let Some(arg) = it.next() {
-        match arg.as_str() {
-            "--word" => {
-                let word = it
-                    .next()
-                    .ok_or_else(|| anyhow!("missing argument to `--word`"))?;
-
-                words.insert(word.to_lowercase());
-            }
-            "--any" => {
-                any_word = true;
-            }
-            "--count" => {
-                count = true;
-            }
-            "--dist" => {
-                dist = true;
-            }
-            "--limit" => {
-                let l = it
-                    .next()
-                    .ok_or_else(|| anyhow!("missing argument to `--limit`"))?;
-                limit =
-                    str::parse::<usize>(&l).map_err(|_| anyhow!("bad argument to `--limit`"))?;
-            }
-            "-h" | "--help" => {
-                print_help();
-                return Ok(());
-            }
-            arg => {
-                print_help();
-                bail!("Unsupported argument `{}`", arg);
-            }
+    let args = argwerk::args! {
+        "chat [--word <word>] [--count] [--dist] [--limit <n>]" {
+            words: HashSet<String> = HashSet::new(),
+            count: bool = false,
+            dist: bool = false,
+            limit: usize = 20,
+            any_word: bool = false,
+            help: bool,
         }
+        /// Add a word to the list to search for. This will cause `words.png` to
+        /// be written and print word usage statistics to console.
+        ["--word", word] => {
+            words.insert(word.to_lowercase());
+        }
+        /// Like `--word <word>`, but matches any words.
+        ["--any"] => {
+            any_word = true;
+        }
+        /// Perform overall aggregation over total word count use.
+        ["--count"] => {
+            count = true;
+        }
+        /// Write a `contributions.png` which contains the distribution of the percentage of users contributing to chat.
+        ["--dist"] => {
+            dist = true;
+        }
+        /// Limit the number of users to show (default: 20).
+        ["--limit", n] => {
+            limit = str::parse::<usize>(&n)?;
+        }
+        ["-h" | "--help"] => {
+            help = true;
+        }
+    }?;
+
+    if args.help {
+        println!("{}", args.help());
+        return Ok(());
     }
 
     let root = std::env::current_dir()?;
@@ -97,7 +82,7 @@ fn main() -> Result<()> {
                 total_words += 1;
                 *count += 1;
 
-                if any_word || words.contains(&w) {
+                if args.any_word || args.words.contains(&w) {
                     *offenders.entry(record.author.clone()).or_default() += 1;
                     *months.entry(date.month() - 1).or_default() += 1;
                 }
@@ -105,9 +90,10 @@ fn main() -> Result<()> {
         }
     }
 
-    if !words.is_empty() || any_word {
-        let title = if !any_word {
-            let mut word = words
+    if !args.words.is_empty() || args.any_word {
+        let title = if !args.any_word {
+            let mut word = args
+                .words
                 .iter()
                 .map(|s| format!("\"{}\"", s.as_str()))
                 .collect::<Vec<_>>();
@@ -121,14 +107,14 @@ fn main() -> Result<()> {
         chat::month_plot(&words_png, months, &title)?;
         println!("Wrote: {}", words_png.display());
 
-        format_list(title, &offenders, limit, "")?;
+        format_list(title, &offenders, args.limit, "")?;
     }
 
-    if count {
-        format_list(format!("Top chatters"), &counts, limit, " words")?;
+    if args.count {
+        format_list(format!("Top chatters"), &counts, args.limit, " words")?;
     }
 
-    if dist {
+    if args.dist {
         let counts = sorted_source(&counts);
         let total = total_words as f64;
         let counts = counts
