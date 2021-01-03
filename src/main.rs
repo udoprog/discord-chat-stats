@@ -8,6 +8,7 @@ fn print_help() {
     println!();
     println!("--limit <limit> - Limit the number of users to show (default: 20).");
     println!("--word <word>   - Add a word to the list to search for. This will cause `words.png` to be written and print word usage statistics to console.");
+    println!("--any           - Like `--word <word>`, but matches any words.");
     println!("--count         - Perform overall aggregation over total word count use.");
     println!("--dist          - Write a `contributions.png` which contains a distribution of the percentage of users contributing to chat.");
 }
@@ -17,6 +18,7 @@ fn main() -> Result<()> {
     let mut count = false;
     let mut dist = false;
     let mut limit = 20;
+    let mut any_word = false;
 
     let mut it = std::env::args();
     it.next();
@@ -29,6 +31,9 @@ fn main() -> Result<()> {
                     .ok_or_else(|| anyhow!("missing argument to `--word`"))?;
 
                 words.insert(word.to_lowercase());
+            }
+            "--any" => {
+                any_word = true;
             }
             "--count" => {
                 count = true;
@@ -64,7 +69,7 @@ fn main() -> Result<()> {
     let words_png = root.join("words.png");
     let contributions_png = root.join("contributions.png");
 
-    let mut months = Vec::new();
+    let mut months = HashMap::<u32, u64>::new();
     let mut offenders = HashMap::<Box<str>, u64>::new();
     let mut counts = HashMap::<Box<str>, u64>::new();
     let mut total_words = 0;
@@ -92,22 +97,31 @@ fn main() -> Result<()> {
                 total_words += 1;
                 *count += 1;
 
-                if words.contains(&w) {
+                if any_word || words.contains(&w) {
                     *offenders.entry(record.author.clone()).or_default() += 1;
-                    months.push(date.month() - 1);
+                    *months.entry(date.month() - 1).or_default() += 1;
                 }
             }
         }
     }
 
-    if !words.is_empty() {
-        let mut word = words.iter().map(|s| s.as_str()).collect::<Vec<_>>();
-        word.sort();
-        let word = word.join("/");
+    if !words.is_empty() || any_word {
+        let title = if !any_word {
+            let mut word = words
+                .iter()
+                .map(|s| format!("\"{}\"", s.as_str()))
+                .collect::<Vec<_>>();
+            word.sort();
+            format!("Uses of {} by month", word.join(" / "))
+        } else {
+            String::from("Words by month")
+        };
 
-        chat::month_plot(&words_png, months, &word)?;
+        let months = sorted_source(&months);
+        chat::month_plot(&words_png, months, &title)?;
+        println!("Wrote: {}", words_png.display());
 
-        format_list(format!("Top users of \"{}\"", word), &offenders, limit, "")?;
+        format_list(title, &offenders, limit, "")?;
     }
 
     if count {
@@ -123,12 +137,16 @@ fn main() -> Result<()> {
             .collect::<Vec<_>>();
 
         chat::contributions_per_user(&contributions_png, counts)?;
+        println!("Wrote: {}", contributions_png.display());
     }
 
     Ok(())
 }
 
-fn sorted_source(source: &HashMap<Box<str>, u64>) -> Vec<(Box<str>, u64)> {
+fn sorted_source<K>(source: &HashMap<K, u64>) -> Vec<(K, u64)>
+where
+    K: Clone,
+{
     let mut source = source
         .into_iter()
         .map(|(author, uses)| (author.clone(), *uses))

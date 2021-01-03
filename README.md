@@ -6,7 +6,7 @@ We can currently do:
 * The distribution of contributions on the server (e.g. how many users are
   really active) (`--dist`).
 * Overall word count breakdown (`--count`).
-* Specific word count breakdown (`--word <word>`).
+* Specific word count breakdown (`--word <word>` or `--any`).
 
 Note: You'll need to export the chat data into a folder called `exports`.
 
